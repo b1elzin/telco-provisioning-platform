@@ -1,73 +1,77 @@
-# Telco Provisioning Platform
+# telco-provisioning-platform
 
-An event-driven, provider-agnostic provisioning platform built as a clean-room portfolio project. It demonstrates how telecom operations can be routed, observed and safely retried across multiple downstream providers.
+Small provisioning lab with an API and an operations UI. I use it to exercise a few problems that show up in multi-provider flows: idempotency, fan-out, partial success and per-target status.
 
-> This repository contains original code and synthetic data. It does not contain employer source code, production configuration, credentials, customer data, real provider contracts or proprietary endpoints.
+This is currently an in-memory implementation. Restarting the API clears the orders. The next step is moving order creation and job publication to a transactional outbox.
 
-## Why this project exists
+## Repository layout
 
-Provisioning flows tend to grow as point-to-point integrations. That makes failures hard to trace, provider changes risky and operational status invisible. This project centralizes those concerns in a small orchestration layer and exposes the result through an operations dashboard.
-
-## Capabilities
-
-- Provider-neutral activation, deactivation, blocking and unblocking
-- Fan-out to `provider-alpha`, `provider-beta` and `ims-provider`
-- Request-level idempotency
-- Per-target execution status and correlation IDs
-- Retry-safe asynchronous processing
-- Operational metrics and a live dashboard
-- Synthetic failure scenarios for demonstrations
-- OpenAPI documentation and automated tests
-
-## Architecture
-
-```mermaid
-flowchart LR
-  A[Channels and BSS] -->|REST + idempotency key| H[Provisioning API]
-  H --> O[(Orders)]
-  H --> Q[Async execution queue]
-  Q --> P1[Provider Alpha]
-  Q --> P2[Provider Beta]
-  Q --> IMS[IMS Provider]
-  P1 --> S[Execution status]
-  P2 --> S
-  IMS --> S
-  S --> D[Operations dashboard]
+```text
+apps/
+  api/          Fastify API and orchestration code
+  dashboard/    React/Vite operations UI
+docs/adr/       decisions that are worth keeping outside the code
 ```
 
-## Run locally
+## Run it
+
+Requires Node.js 22+.
 
 ```bash
 npm install
 npm run dev
 ```
 
-- API: `http://localhost:3001`
-- OpenAPI: `http://localhost:3001/docs`
-- Dashboard: `http://localhost:5173`
+| Service | Address |
+| --- | --- |
+| API | http://localhost:3001 |
+| OpenAPI UI | http://localhost:3001/docs |
+| Dashboard | http://localhost:5173 |
 
-Create a demo order:
+Create an order:
 
 ```bash
-curl -X POST http://localhost:3001/v1/orders \
+curl -i -X POST http://localhost:3001/v1/orders \
   -H "content-type: application/json" \
-  -H "idempotency-key: demo-activation-001" \
-  -d '{"subscriberId":"sub-demo-1001","operation":"ACTIVATE","targets":["provider-alpha","ims-provider"]}'
+  -H "idempotency-key: local-activation-001" \
+  -d '{"subscriberId":"sub-1001","operation":"ACTIVATE","targets":["provider-alpha","ims-provider"]}'
 ```
 
-## Engineering decisions
+Sending the same request again with the same key returns the original order and sets `x-idempotent-replay: true`.
 
-- [ADR 001: provider-neutral orchestration](docs/adr/001-provider-neutral-orchestration.md)
-- [Public portfolio safety policy](SECURITY.md)
+To force a partial failure:
 
-## Roadmap
+```json
+{
+  "subscriberId": "sub-1002",
+  "operation": "ACTIVATE",
+  "targets": ["provider-alpha", "ims-provider"],
+  "simulateFailureFor": ["ims-provider"]
+}
+```
 
-- PostgreSQL persistence and transactional outbox
-- LocalStack/SQS adapter alongside the in-memory queue
-- Exponential retry and dead-letter recovery console
-- OpenTelemetry traces
-- Role-based dashboard access
+The failed execution can be retried without rerunning the successful target:
 
-## License
+```text
+POST /v1/orders/:orderId/executions/ims-provider/retry
+```
 
-MIT. The fictional provider names and synthetic examples exist solely for demonstration.
+## Useful commands
+
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run scan:secrets
+```
+
+## Current trade-offs
+
+- State and queueing are in-process; there is no durability across restarts.
+- Provider adapters only simulate latency and failures.
+- Idempotency is process-local; key reuse with a different subscriber, operation or target set returns HTTP 409.
+- The dashboard polls every three seconds; there is no event stream yet.
+
+These are intentional constraints for the first cut, not production recommendations. The persistence boundary and transactional outbox are tracked as the next implementation step.
+
+See [ADR 001](docs/adr/001-provider-neutral-orchestration.md) for why provider routing stays behind the orchestration API.
