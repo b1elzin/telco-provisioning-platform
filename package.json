@@ -1,0 +1,21 @@
+{
+  "name": "telco-provisioning-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,dashboard -c cyan,magenta \"npm run dev -w @portfolio/api\" \"npm run dev -w @portfolio/dashboard\"",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "scan:secrets": "secretlint \"**/*\""
+  },
+  "devDependencies": {
+    "@secretlint/secretlint-rule-preset-recommend": "^11.2.4",
+    "concurrently": "^9.2.1",
+    "secretlint": "^11.2.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
