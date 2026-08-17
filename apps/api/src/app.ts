@@ -4,7 +4,7 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { operations, targets } from './domain.js';
-import { ProvisioningOrchestrator } from './orchestrator.js';
+import { IdempotencyConflictError, ProvisioningOrchestrator } from './orchestrator.js';
 import { InMemoryOrderStore } from './store.js';
 
 const createOrderSchema = z.object({
@@ -14,19 +14,26 @@ const createOrderSchema = z.object({
   simulateFailureFor: z.array(z.enum(targets)).optional(),
 });
 
-export function buildApp() {
-  const app = Fastify({ logger: true });
+export interface AppOptions {
+  logger?: boolean;
+  docs?: boolean;
+}
+
+export function buildApp(options: AppOptions = {}) {
+  const app = Fastify({ logger: options.logger ?? true });
   const store = new InMemoryOrderStore();
   const orchestrator = new ProvisioningOrchestrator(store);
 
   void app.register(cors, { origin: true });
-  void app.register(swagger, {
-    openapi: {
-      info: { title: 'Telco Provisioning Platform', version: '0.1.0' },
-      tags: [{ name: 'orders' }, { name: 'operations' }],
-    },
-  });
-  void app.register(swaggerUi, { routePrefix: '/docs' });
+  if (options.docs ?? true) {
+    void app.register(swagger, {
+      openapi: {
+        info: { title: 'Telco Provisioning Platform', version: '0.1.0' },
+        tags: [{ name: 'orders' }, { name: 'operations' }],
+      },
+    });
+    void app.register(swaggerUi, { routePrefix: '/docs' });
+  }
 
   app.get('/health', async () => ({ status: 'ok' }));
 
@@ -38,9 +45,14 @@ export function buildApp() {
     const parsed = createOrderSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid request', details: parsed.error.issues });
 
-    const result = orchestrator.create(parsed.data, idempotencyKey);
-    reply.header('x-idempotent-replay', String(result.replayed));
-    return reply.code(result.replayed ? 200 : 202).send(result.order);
+    try {
+      const result = orchestrator.create(parsed.data, idempotencyKey);
+      reply.header('x-idempotent-replay', String(result.replayed));
+      return reply.code(result.replayed ? 200 : 202).send(result.order);
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) return reply.code(409).send({ error: error.message });
+      throw error;
+    }
   });
 
   app.get('/v1/orders', { schema: { tags: ['orders'] } }, async () => store.list());

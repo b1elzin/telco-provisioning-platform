@@ -1,12 +1,20 @@
 import { deriveOrderStatus, newOrder, type CreateOrderInput, type Order, type Target } from './domain.js';
 import { InMemoryOrderStore } from './store.js';
 
+export class IdempotencyConflictError extends Error {}
+
 export class ProvisioningOrchestrator {
   constructor(private readonly store: InMemoryOrderStore) {}
 
   create(input: CreateOrderInput, idempotencyKey: string): { order: Order; replayed: boolean } {
     const existing = this.store.findByIdempotencyKey(idempotencyKey);
-    if (existing) return { order: existing, replayed: true };
+    if (existing) {
+      const sameRequest = existing.subscriberId === input.subscriberId
+        && existing.operation === input.operation
+        && sameTargets(existing.executions.map((item) => item.target), input.targets);
+      if (!sameRequest) throw new IdempotencyConflictError('Idempotency key was already used for a different request');
+      return { order: existing, replayed: true };
+    }
 
     const order = newOrder(input, idempotencyKey);
     this.store.save(order);
@@ -50,4 +58,8 @@ export class ProvisioningOrchestrator {
     order.updatedAt = new Date().toISOString();
     this.store.save(order);
   }
+}
+
+function sameTargets(left: string[], right: string[]): boolean {
+  return left.length === right.length && [...left].sort().every((target, index) => target === [...right].sort()[index]);
 }
