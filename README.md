@@ -2,7 +2,7 @@
 
 Small provisioning lab with an API and an operations UI. I use it to exercise a few problems that show up in multi-provider flows: idempotency, fan-out, partial success and per-target status.
 
-This is currently an in-memory implementation. Restarting the API clears the orders. The next step is moving order creation and job publication to a transactional outbox.
+This is currently an in-memory implementation. Restarting the API clears the orders. The next step is [moving order creation and job publication to a transactional outbox](https://github.com/b1elzin/telco-provisioning-platform/issues/1).
 
 ## Repository layout
 
@@ -70,7 +70,7 @@ npm run scan:secrets
 - State and queueing are in-process; there is no durability across restarts.
 - Provider adapters only simulate latency and failures.
 - Idempotency is process-local; key reuse with a different subscriber, operation or target set returns HTTP 409.
-- The dashboard polls every three seconds; there is no event stream yet.
+- The dashboard polls every three seconds; [streaming execution updates](https://github.com/b1elzin/telco-provisioning-platform/issues/2) is still open.
 
 These are intentional constraints for the first cut, not production recommendations. The persistence boundary and transactional outbox are tracked as the next implementation step.
 
